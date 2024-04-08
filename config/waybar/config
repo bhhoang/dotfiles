@@ -18,11 +18,11 @@
          "all-outputs": true,
          "warp-on-scroll": false,
          "format": "{name}",
-         "format": "{icon}",
-	 "format-icons": {
-          "active": "",
-          "default": ""
-      	 }
+         //"format": "{icon}",
+	 //"format-icons": {
+     //     "active": "",
+     //     "default": ""
+      //	 }
 	 //"format-icons": {
          //    "1": "",
          //    "2": "",
@@ -136,14 +136,14 @@
         "format-charging": "{capacity}% ",
         "format-plugged": "{capacity}% ",
         "format-alt": "{time} {icon}",
-        "format-good": "", // An empty format will hide the module
-        "format-full": "",
-        "format-icons": ["", "", "", "", ""]
+        "format-good": "{capacity}% {icon}", // An empty format will hide the module
+        "format-full": "Full ",
+        "format-icons": ["", "", "", "", ""],
     },
     "battery#bat2": {
         "bat": "BAT2"
     },
-    "network": {
+   "network": {
         // "interface": "wlp2*", // (Optional) To force the use of this interface
         "format-wifi": "{essid} ({signalStrength}%) ",
         "format-ethernet": "{ipaddr}/{cidr} ",
