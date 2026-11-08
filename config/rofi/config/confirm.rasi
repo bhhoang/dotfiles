@@ -2,24 +2,69 @@
 @import "font.rasi"
 
 * {
-    background-color:       @BG;
-    text-color:             @FG;
+    background-color: transparent;
+    text-color: @FG;
 }
 
 window {
-    width:      	        250px;
-    padding:                20px;
-    border:		            0px 0px 2px 0px;
-    border-radius:          8px;
-    border-color:           @BDR;
-    location:               0;
-    x-offset:               0;
-    y-offset:               -4%;
+    transparency: "real";
+    location: center;
+    width: 280px;
+    padding: 14px;
+    background-color: @BG;
+    border: 1px;
+    border-color: @BDR;
+    border-radius: 16px;
 }
 
-entry {
-    expand: 		        true;
-    width: 		            150px;
-    text-color:		        @BDR;
+mainbox {
+    background-color: transparent;
+    spacing: 8px;
+    padding: 4px;
 }
 
+inputbar {
+    children: [ prompt ];
+    background-color: transparent;
+    text-color: @BGA;
+    padding: 4px 6px;
+}
+
+prompt {
+    background-color: transparent;
+    text-color: @BGA;
+}
+
+listview {
+    background-color: transparent;
+    columns: 1;
+    lines: 2;
+    spacing: 4px;
+    scrollbar: false;
+    dynamic: true;
+    cycle: true;
+    layout: vertical;
+}
+
+element {
+    background-color: transparent;
+    text-color: @FG;
+    border-radius: 10px;
+    padding: 8px 12px;
+}
+
+element selected {
+    background-color: @BGA;
+    text-color: @SEL;
+}
+
+element-text {
+    background-color: transparent;
+    text-color: inherit;
+    font: "NotoSans Nerd Font Propo 14";
+    vertical-align: 0.5;
+}
+
+message {
+    background-color: transparent;
+}

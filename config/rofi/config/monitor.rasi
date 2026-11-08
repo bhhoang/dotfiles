@@ -1,0 +1,92 @@
+configuration {
+    show-icons:                     false;
+    disable-history:                false;
+    click-to-exit:                  true;
+}
+
+@import "colors.rasi"
+@import "font.rasi"
+
+window {
+    transparency:                   "real";
+    location:                       east;
+    anchor:                         east;
+    x-offset:                       -14px;
+    y-offset:                       0;
+    width:                          300px;
+    padding:                        14px;
+    background-color:               @BG;
+    text-color:                     @FG;
+    border:                         1px;
+    border-color:                   @BDR;
+    border-radius:                  18px;
+}
+
+mainbox {
+    background-color:               transparent;
+    spacing:                        10px;
+    padding:                        4px;
+}
+
+inputbar {
+    enabled:                        false;
+    padding:                        0;
+    margin:                         0;
+    background-color:               transparent;
+    border:                         0;
+}
+
+listview {
+    background-color:               transparent;
+    columns:                        1;
+    lines:                          4;
+    spacing:                        6px;
+    scrollbar:                      false;
+    dynamic:                        true;
+    cycle:                          true;
+    layout:                         vertical;
+}
+
+element {
+    background-color:               transparent;
+    text-color:                     @FG;
+    border-radius:                  12px;
+    padding:                        10px 14px;
+    spacing:                        10px;
+    orientation:                    horizontal;
+}
+
+element-icon {
+    background-color:               transparent;
+    size:                           0px;
+}
+
+element-text {
+    background-color:               transparent;
+    text-color:                     inherit;
+    font:                           "NotoSans Nerd Font Propo 14";
+    vertical-align:                 0.5;
+    horizontal-align:               0.0;
+}
+
+element selected {
+    background-color:               @BGA;
+    text-color:                     @SEL;
+    border-radius:                  12px;
+}
+
+element urgent,
+element selected urgent {
+    background-color:               @UGT;
+    text-color:                     @SEL;
+}
+
+textbox {
+    background-color:               transparent;
+    text-color:                     @FG;
+}
+
+case-indicator {
+    background-color:               transparent;
+    text-color:                     @OFF;
+}
