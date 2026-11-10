@@ -13,8 +13,10 @@ Theme:
   (`banner_scale fillscreen`), so it scales to the display instead of baking a
   fixed panel
 - `big_icon_size 144`, `small_icon_size 64`
-- `os_arch.png` — 256×256 canvas with a padded white Arch glyph; the visible
-  glyph is 72px inside the 144px icon slot
+- OS icons — 256×256 canvases with ~120px of visible artwork (≈67px inside
+  the 144px slot). `os_arch.png` keeps the white Arch glyph, and every other
+  `os_*`/`boot_*` icon is trimmed and padded to the same ratio so they do not
+  fill the selection capsule
 - `selection_big_144.png` / `selection_small_64.png` — clean rounded glass
   capsules, no clipped outer halo
 - Tool icons are padded: 32px glyphs inside 64px slots, so they do not fill
