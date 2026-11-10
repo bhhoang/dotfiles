@@ -13,8 +13,8 @@ Dotfiles for my arch config
 
 `start-xorg.sh` detects the DRM card that owns the connected external output:
 
-- NVIDIA → `Driver "nvidia"`
-- Intel/AMD/other → `Driver "modesetting"`
+- NVIDIA with the Xorg driver installed → `Driver "nvidia"`
+- NVIDIA without the Xorg driver, Intel/AMD/other → `Driver "modesetting"`
 
 It falls back to the internal panel when no external display is connected.
 `Xsetup` makes the external output primary. The generated Xorg config is

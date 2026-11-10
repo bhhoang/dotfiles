@@ -30,8 +30,16 @@ IFS=':.' read -r _ bus dev fn <<< "$pci"
 busid=$(printf 'PCI:%d:%d:%d' "$((16#$bus))" "$((16#$dev))" "$((16#$fn))")
 
 case "$driver" in
-    nvidia) xdriver=nvidia ;;
-    *)      xdriver=modesetting ;;
+    nvidia)
+        if [ -e /usr/lib/xorg/modules/drivers/nvidia_drv.so ]; then
+            xdriver=nvidia
+        else
+            xdriver=modesetting
+        fi
+        ;;
+    *)
+        xdriver=modesetting
+        ;;
 esac
 
 mkdir -p /run/sddm

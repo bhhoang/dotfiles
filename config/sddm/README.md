@@ -11,8 +11,8 @@ Install:
 `start-xorg.sh` scans `/sys/class/drm/card*-*/status`, finds the DRM card with
 a connected external output (HDMI/DP, not eDP/LVDS/DSI), and chooses:
 
-- NVIDIA → `Driver "nvidia"`
-- Intel/AMD/other → `Driver "modesetting"`
+- NVIDIA with the Xorg `nvidia` driver installed → `Driver "nvidia"`
+- NVIDIA without the Xorg driver, Intel/AMD/other → `Driver "modesetting"`
 
 If no external display is connected, it uses the internal panel. The generated
 Xorg configuration is written to `/run/sddm/xorg.conf` and passed to Xorg with
