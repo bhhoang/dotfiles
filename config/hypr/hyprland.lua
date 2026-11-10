@@ -140,6 +140,12 @@ local monitorProfiles = {
         end,
         apply = function()
             local laptop, external = internalMonitor(), externalMonitor()
+            -- Stop mirroring while the panel is still enabled, then disable it.
+            -- Position the external aside first so the two outputs never
+            -- briefly overlap at 0x0 without the mirror flag.
+            if external then
+                hl.monitor({ output = external.name, mirror = "", disabled = false, position = "auto", scale = "auto" })
+            end
             if laptop then
                 hl.monitor({ output = laptop.name, disabled = true })
             end
