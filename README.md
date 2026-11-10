@@ -42,8 +42,9 @@ same workspace and cursor. Both outputs use the lower of their two scales,
 which keeps the lower-DPI screen at 1:1 and avoids upscaling blur. The mirror
 works across GPUs; no firmware MUX is involved.
 
-`Extend` and `Laptop only` cap a 1080p internal panel at 1.25 instead of
-Hyprland's PPI-based auto value (1.5 here). Denser panels keep the auto scale.
+`Extend` caps a 1080p internal panel at 1.25 instead of Hyprland's PPI-based
+auto value (1.5 here); `Laptop only` uses 1.0. Denser panels keep the auto
+scale.
 
 The profiles assume one internal panel plus one external output. On a desktop
 with only external monitors, `Extend` leaves the auto layout alone and the

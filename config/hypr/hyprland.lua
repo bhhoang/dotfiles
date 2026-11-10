@@ -145,6 +145,8 @@ end
 -- hl.monitor() merges into the existing rule for the same output, so each
 -- profile only changes the fields it cares about. Runtime changes are
 -- forgotten on config reload/restart, which restores the layout above.
+-- Runtime monitor profiles, cycled with SUPER + SHIFT + M:
+
 local monitorProfiles = {
     {
         name = "Extend",
@@ -168,16 +170,25 @@ local monitorProfiles = {
         end,
         apply = function()
             local laptop, external = internalMonitor(), externalMonitor()
-            -- Stop mirroring while the panel is still enabled, then disable it.
-            -- Position the external aside first so the two outputs never
-            -- briefly overlap at 0x0 without the mirror flag.
-            if external then
+            if not external then return end
+
+            if external.is_mirror then
+                -- Stop mirroring while the panel is still enabled, then
+                -- disable it. Move the external aside first so the outputs
+                -- never briefly overlap at 0x0 without the mirror flag.
                 hl.monitor({ output = external.name, mirror = "", disabled = false, position = "auto", scale = "auto" })
-            end
-            if laptop then
-                hl.monitor({ output = laptop.name, disabled = true })
-            end
-            if external then
+                if laptop then
+                    hl.monitor({ output = laptop.name, disabled = true })
+                end
+                hl.monitor({ output = external.name, mirror = "", disabled = false, position = "0x0", scale = "auto" })
+            else
+                -- Disable the panel first. Enabling a previously disabled
+                -- external on an otherwise empty layout gives the compositor
+                -- a clean wl_output to create; enabling it while the panel is
+                -- still active can leave the external without a global.
+                if laptop then
+                    hl.monitor({ output = laptop.name, disabled = true })
+                end
                 hl.monitor({ output = external.name, mirror = "", disabled = false, position = "0x0", scale = "auto" })
             end
         end,
@@ -204,7 +215,7 @@ local monitorProfiles = {
                 hl.monitor({ output = external.name, mirror = "", disabled = true })
             end
             if laptop then
-                hl.monitor({ output = laptop.name, disabled = false, position = "0x0", scale = panelScale(laptop) })
+                hl.monitor({ output = laptop.name, disabled = false, position = "0x0", scale = 1 })
             end
         end,
     },
