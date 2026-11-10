@@ -25,5 +25,17 @@ Theme:
   drive badge
 - Built-in rEFInd font; dynamic label/countdown
 
+## Portability
+
+- The theme assets (`bg-adaptive.png`, selection capsules, icon set) are
+  portable and have no GPU dependency.
+- `big_icon_size` / `small_icon_size` are fixed pixel sizes; rEFInd has no
+  auto or percentage icon sizing. Adjust them for the target resolution; the
+  background itself scales.
+- Update the root UUID in `refind_linux.conf` and the manual entry `options`,
+  and the ESP label in `dont_scan_volumes`, for another machine.
+- The firmware boot menu output is controlled by the firmware/BIOS, not by
+  rEFInd or this theme.
+
 The full icon set is under `theme/icons/`. The `refind_x64.efi` binary is not
 tracked. Install it with `refind-install` or copy it from the `refind` package.
