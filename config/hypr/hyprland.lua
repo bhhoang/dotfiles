@@ -95,6 +95,16 @@ local function logicalWidth(monitor)
     return math.floor((monitor.width or 0) / (monitor.scale or 1) + 0.5)
 end
 
+--- Which DRM card drives an output. Hyprland cannot mirror across GPUs, so
+--- the Duplicate profile is only valid when both outputs share a card.
+local function monitorCard(name)
+    local ok, handle = pcall(io.popen, "readlink -f /sys/class/drm/card*-" .. name .. " 2>/dev/null")
+    if not ok or not handle then return nil end
+    local path = handle:read("*l")
+    handle:close()
+    return path and path:match("card(%d+)")
+end
+
 -- Runtime monitor profiles, cycled with SUPER + SHIFT + M:
 --   Extend -> External only -> Duplicate -> Laptop only
 -- Profiles needing an output that is not connected are skipped.
@@ -136,15 +146,32 @@ local monitorProfiles = {
     {
         name = "Duplicate",
         canApply = function()
-            return internalMonitor() ~= nil and externalMonitor() ~= nil
+            local laptop, external = internalMonitor(), externalMonitor()
+            if not laptop or not external then return false end
+            local laptopCard = monitorCard(laptop.name)
+            local externalCard = monitorCard(external.name)
+            return laptopCard ~= nil and laptopCard == externalCard
         end,
         apply = function()
             local laptop, external = internalMonitor(), externalMonitor()
+            -- Move the external aside before enabling the laptop, then mirror.
+            -- Enabling the laptop while both outputs are at 0x0 (and the
+            -- external has no mirror flag yet) makes Hyprland briefly report
+            -- an overlap.
+            if external then
+                local position = laptop and (tostring(logicalWidth(laptop)) .. "x0") or "0x0"
+                hl.monitor({ output = external.name, mirror = "", disabled = false, position = position })
+            end
             if laptop then
-                hl.monitor({ output = laptop.name, disabled = false })
+                hl.monitor({ output = laptop.name, disabled = false, position = "0x0" })
             end
             if external then
-                hl.monitor({ output = external.name, mirror = laptop and laptop.name or "", disabled = false })
+                hl.monitor({
+                    output = external.name,
+                    mirror = laptop and laptop.name or "",
+                    disabled = false,
+                    position = "0x0",
+                })
             end
         end,
     },
@@ -256,7 +283,14 @@ local function applySavedProfile()
         return
     end
 
-    local fallback = internalMonitor() and "Laptop only" or "Extend"
+    local fallback
+    if externalMonitor() then
+        fallback = "External only"
+    elseif internalMonitor() then
+        fallback = "Laptop only"
+    else
+        fallback = "Extend"
+    end
     hyprSetMonitorProfile(fallback, { silent = true, persist = false })
 end
 
