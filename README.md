@@ -31,5 +31,16 @@ Machine-specific values:
 - ESP label in `config/refind/refind.conf`
 - rEFInd icon sizes are fixed pixels; adjust them for other resolutions
 
+## Hyprland monitor profiles
+
+`SUPER + SHIFT + M` cycles `Extend`, `External only`, `Duplicate`, and
+`Laptop only`. Profiles whose outputs are not connected are skipped.
+
+Hyprland cannot mirror across GPUs, so `Duplicate` is only offered when the
+internal panel and the external output are on the same DRM card. Laptops that
+wire the panel to the iGPU and HDMI to the dGPU need a firmware MUX /
+Discrete Graphics / PEG setting to make a real duplicate possible; otherwise
+use `Extend` or `External only`, or a software mirror such as `wl-mirror`.
+
 The Hyprland monitor setup is auto-detected, and the NVIDIA environment lines
 in `hyprland.lua` are commented out, so it is not tied to this GPU.
