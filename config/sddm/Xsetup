@@ -1,23 +1,82 @@
 #!/bin/sh
-# Prefer connected external outputs for the SDDM greeter.
-external=""
-internal=""
-extra=""
+# SDDM greeter layout.
+#
+# With /etc/sddm/mirror-both and both GPUs in the X server, attach the NVIDIA
+# GPU as a Reverse PRIME sink and mirror the external output onto the internal
+# panel, so the greeter appears on both screens.
+#
+# Otherwise prefer the external output: first external primary, extra
+# externals mirrored, internal panel off.
 
-for out in $(xrandr --query 2>/dev/null | awk '/ connected/ {print $1}'); do
-    case "$out" in
-        eDP*|LVDS*|DSI*)
-            internal="$out"
-            ;;
-        *)
-            if [ -z "$external" ]; then
-                external="$out"
+detect_outputs() {
+    internal=""
+    external=""
+    extra=""
+    for out in $(xrandr --query 2>/dev/null | awk '/ connected/ {print $1}'); do
+        case "$out" in
+            eDP*|LVDS*|DSI*)
+                internal="$out"
+                ;;
+            *)
+                if [ -z "$external" ]; then
+                    external="$out"
+                else
+                    extra="$extra $out"
+                fi
+                ;;
+        esac
+    done
+}
+
+detect_outputs
+
+if [ -e /etc/sddm/mirror-both ] && [ -n "$internal" ] && [ -n "$external" ]; then
+    providers=$(xrandr --listproviders 2>/dev/null)
+    source_id=$(printf '%s\n' "$providers" | awk '/name:modesetting/ {for (i=1;i<=NF;i++) if ($i=="id:") {print $(i+1); exit}}')
+    sink_id=$(printf '%s\n' "$providers" | awk '/name:NVIDIA/ {for (i=1;i<=NF;i++) if ($i=="id:") {print $(i+1); exit}}')
+
+    if [ -n "$source_id" ] && [ -n "$sink_id" ]; then
+        xrandr --setprovideroutputsource "$sink_id" "$source_id" 2>/dev/null || true
+        xrandr --auto 2>/dev/null || true
+        detect_outputs
+    fi
+
+    if [ -n "$internal" ] && [ -n "$external" ]; then
+        xrandr --output "$internal" --auto --primary 2>/dev/null || true
+
+        mode=$(xrandr --query 2>/dev/null | awk -v out="$internal" '
+            $1 == out {
+                for (i = 1; i <= NF; i++)
+                    if ($i ~ /^[0-9]+x[0-9]+[*+]+$/) {
+                        gsub(/[*+]/, "", $i)
+                        print $i
+                        exit
+                    }
+            }')
+
+        for out in $external $extra; do
+            if [ -n "$mode" ]; then
+                xrandr --output "$out" --mode "$mode" --same-as "$internal" 2>/dev/null || true
             else
-                extra="$extra $out"
+                xrandr --output "$out" --auto --same-as "$internal" 2>/dev/null || true
             fi
-            ;;
-    esac
-done
+        done
+
+        # If the external did not get a current mode, turn it off rather than
+        # leave the greeter on a black output.
+        if ! xrandr --query 2>/dev/null | awk -v out="$external" '
+                $1 == out {
+                    for (i = 1; i <= NF; i++)
+                        if ($i ~ /\*$/) found = 1
+                }
+                END { exit !found }'; then
+            for out in $external $extra; do
+                xrandr --output "$out" --off 2>/dev/null || true
+            done
+        fi
+        exit 0
+    fi
+fi
 
 if [ -n "$external" ]; then
     xrandr --output "$external" --auto --primary

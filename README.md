@@ -19,7 +19,14 @@ Dotfiles for my arch config
 It falls back to the internal panel when no external display is connected.
 `Xsetup` makes the first external output primary, mirrors additional external
 outputs on the same GPU, and turns off the internal panel when an external is
-present. The generated Xorg config is `/run/sddm/xorg.conf`.
+present. The generated Xorg config is `/run/sddm/xorg-single.conf`.
+
+With `/etc/sddm/mirror-both`, and when the panel and the external output are on
+different GPUs, `start-xorg.sh` writes `/run/sddm/xorg-dual.conf` instead: the
+internal GPU is the primary `modesetting` screen and the NVIDIA GPU is an
+inactive Reverse PRIME sink. `Xsetup` attaches it and mirrors the external
+output onto the internal panel, so the greeter appears on both screens.
+Remove the flag to return to the external-only greeter.
 
 The firmware boot menu may still appear on the internal panel; use the BIOS
 Primary Display / Discrete Graphics / PEG setting to move it.
