@@ -1,9 +1,30 @@
 #!/bin/sh
-# Prefer a connected external output for the SDDM greeter.
+# Prefer connected external outputs for the SDDM greeter.
+external=""
+internal=""
+extra=""
+
 for out in $(xrandr --query 2>/dev/null | awk '/ connected/ {print $1}'); do
     case "$out" in
-        eDP*|LVDS*|DSI*) ;;
-        *) xrandr --output "$out" --auto --primary ;;
+        eDP*|LVDS*|DSI*)
+            internal="$out"
+            ;;
+        *)
+            if [ -z "$external" ]; then
+                external="$out"
+            else
+                extra="$extra $out"
+            fi
+            ;;
     esac
 done
+
+if [ -n "$external" ]; then
+    xrandr --output "$external" --auto --primary
+    for out in $extra; do
+        xrandr --output "$out" --auto --same-as "$external"
+    done
+    [ -n "$internal" ] && xrandr --output "$internal" --off
+fi
+
 exit 0

@@ -18,8 +18,15 @@ If no external display is connected, it uses the internal panel. The generated
 Xorg configuration is written to `/run/sddm/xorg.conf` and passed to Xorg with
 `-config`.
 
-`Xsetup` then makes the connected external output primary before the greeter
-starts.
+`Xsetup` then lays out the displays:
+
+- The first connected external output becomes primary
+- Additional external outputs on the same GPU are mirrored to it
+- The internal panel is turned off when an external output exists
+- If no external output is connected, the internal panel is left on
+
+Outputs on a different GPU are outside the SDDM Xorg screen; the launcher
+starts the greeter on the card that owns the first external output.
 
 ```ini
 [X11]

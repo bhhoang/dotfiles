@@ -17,8 +17,9 @@ Dotfiles for my arch config
 - NVIDIA without the Xorg driver, Intel/AMD/other → `Driver "modesetting"`
 
 It falls back to the internal panel when no external display is connected.
-`Xsetup` makes the external output primary. The generated Xorg config is
-`/run/sddm/xorg.conf`.
+`Xsetup` makes the first external output primary, mirrors additional external
+outputs on the same GPU, and turns off the internal panel when an external is
+present. The generated Xorg config is `/run/sddm/xorg.conf`.
 
 The firmware boot menu may still appear on the internal panel; use the BIOS
 Primary Display / Discrete Graphics / PEG setting to move it.
