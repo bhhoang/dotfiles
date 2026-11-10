@@ -1,0 +1,9 @@
+#!/bin/sh
+# Prefer a connected external output for the SDDM greeter.
+for out in $(xrandr --query 2>/dev/null | awk '/ connected/ {print $1}'); do
+    case "$out" in
+        eDP*|LVDS*|DSI*) ;;
+        *) xrandr --output "$out" --auto --primary ;;
+    esac
+done
+exit 0
