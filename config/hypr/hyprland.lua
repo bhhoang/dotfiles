@@ -95,14 +95,59 @@ local function logicalWidth(monitor)
     return math.floor((monitor.width or 0) / (monitor.scale or 1) + 0.5)
 end
 
---- Which DRM card drives an output. Hyprland cannot mirror across GPUs, so
---- the Duplicate profile is only valid when both outputs share a card.
+--- Which DRM card drives an output. Hyprland's monitor mirror is a DRM-level
+--- clone and only works within one card, so same-card outputs use the native
+--- mirror and different cards fall back to a software mirror below.
 local function monitorCard(name)
     local ok, handle = pcall(io.popen, "readlink -f /sys/class/drm/card*-" .. name .. " 2>/dev/null")
     if not ok or not handle then return nil end
     local path = handle:read("*l")
     handle:close()
     return path and path:match("card(%d+)")
+end
+
+--- Software mirror for outputs on different GPUs. wl-mirror copies the
+--- composed image of one output into a fullscreen window on another, which is
+--- the same thing Windows' display duplication does (DWM composes once and
+--- scans the result out to both panels). The mirrored output is view-only:
+--- keyboard and pointer input stay on the source output.
+local function softwareMirrorPid()
+    local handle = io.popen("pgrep -x wl-mirror 2>/dev/null | head -n1")
+    if not handle then return nil end
+    local pid = handle:read("*l")
+    handle:close()
+    return pid
+end
+
+local function softwareMirrorRunning()
+    return softwareMirrorPid() ~= nil
+end
+
+local runtimeDir  = os.getenv("XDG_RUNTIME_DIR") or "/tmp"
+local mirrorLock  = runtimeDir .. "/hypr-software-mirror.lock"
+
+local function stopSoftwareMirror()
+    -- wl-mirror ignores SIGTERM and SIGINT, so SIGKILL is the only reliable
+    -- stop. Wait for the process to disappear before a new one can start.
+    os.execute("pkill -KILL -x wl-mirror 2>/dev/null; "
+        .. "for i in $(seq 1 50); do pgrep -x wl-mirror >/dev/null || break; sleep 0.01; done")
+end
+
+local function startSoftwareMirror(source, target)
+    stopSoftwareMirror()
+    -- Serialise starts: one monitor change can fire monitor.added more than
+    -- once, and two fullscreen clients would fight over the same output.
+    os.execute("setsid flock -n " .. mirrorLock
+        .. " wl-mirror -F --fullscreen-output " .. target .. " " .. source
+        .. " >/dev/null 2>&1 &")
+end
+
+local function wlMirrorAvailable()
+    local handle = io.popen("command -v wl-mirror 2>/dev/null")
+    if not handle then return false end
+    local path = handle:read("*l")
+    handle:close()
+    return path ~= nil and path ~= ""
 end
 
 -- Runtime monitor profiles, cycled with SUPER + SHIFT + M:
@@ -120,11 +165,10 @@ local monitorProfiles = {
         apply = function()
             local laptop, external = internalMonitor(), externalMonitor()
             if laptop then
-                hl.monitor({ output = laptop.name, disabled = false, position = "0x0" })
+                hl.monitor({ output = laptop.name, disabled = false, position = "0x0", scale = "auto" })
             end
             if external then
-                local position = laptop and (tostring(logicalWidth(laptop)) .. "x0") or "0x0"
-                hl.monitor({ output = external.name, mirror = "", disabled = false, position = position })
+                hl.monitor({ output = external.name, mirror = "", disabled = false, position = "auto", scale = "auto" })
             end
         end,
     },
@@ -139,7 +183,7 @@ local monitorProfiles = {
                 hl.monitor({ output = laptop.name, disabled = true })
             end
             if external then
-                hl.monitor({ output = external.name, mirror = "", disabled = false, position = "0x0" })
+                hl.monitor({ output = external.name, mirror = "", disabled = false, position = "0x0", scale = "auto" })
             end
         end,
     },
@@ -150,29 +194,47 @@ local monitorProfiles = {
             if not laptop or not external then return false end
             local laptopCard = monitorCard(laptop.name)
             local externalCard = monitorCard(external.name)
-            return laptopCard ~= nil and laptopCard == externalCard
+            if laptopCard ~= nil and laptopCard == externalCard then return true end
+            return wlMirrorAvailable()
         end,
         apply = function()
             local laptop, external = internalMonitor(), externalMonitor()
-            -- Move the external aside before enabling the laptop, then mirror.
-            -- Enabling the laptop while both outputs are at 0x0 (and the
-            -- external has no mirror flag yet) makes Hyprland briefly report
-            -- an overlap.
-            if external then
-                local position = laptop and (tostring(logicalWidth(laptop)) .. "x0") or "0x0"
+            if not laptop or not external then return end
+
+            local laptopCard, externalCard = monitorCard(laptop.name), monitorCard(external.name)
+            local sameCard = laptopCard ~= nil and laptopCard == externalCard
+
+            if sameCard then
+                -- Native mirror: move the external aside before enabling the
+                -- laptop, then mirror. Enabling the laptop while both outputs
+                -- are at 0x0 (and the external has no mirror flag yet) makes
+                -- Hyprland briefly report an overlap.
+                local position = tostring(logicalWidth(laptop)) .. "x0"
                 hl.monitor({ output = external.name, mirror = "", disabled = false, position = position })
-            end
-            if laptop then
                 hl.monitor({ output = laptop.name, disabled = false, position = "0x0" })
-            end
-            if external then
                 hl.monitor({
                     output = external.name,
-                    mirror = laptop and laptop.name or "",
+                    mirror = laptop.name,
                     disabled = false,
                     position = "0x0",
                 })
+            else
+                -- Cross-GPU: keep both outputs in the layout and let wl-mirror
+                -- paint the laptop's image fullscreen on the external.
+                --
+                -- Both outputs run at scale 1 while duplicating. The panel is
+                -- normally at 1.5x (1280x720 logical); copying that to a 1x
+                -- 1920x1080 output would upscale the image and blur the text.
+                hl.monitor({ output = laptop.name, disabled = false, position = "0x0", scale = 1 })
+                local position = tostring(laptop.width or logicalWidth(laptop)) .. "x0"
+                hl.monitor({ output = external.name, mirror = "", disabled = false, position = position, scale = 1 })
+
+                startSoftwareMirror(laptop.name, external.name)
             end
+
+            -- Creating the mirror surface focuses the external output; keep
+            -- keyboard focus on the laptop so new windows open there.
+            hl.dispatch(hl.dsp.focus({ monitor = laptop.name }))
         end,
     },
     {
@@ -186,7 +248,7 @@ local monitorProfiles = {
                 hl.monitor({ output = external.name, mirror = "", disabled = true })
             end
             if laptop then
-                hl.monitor({ output = laptop.name, disabled = false, position = "0x0" })
+                hl.monitor({ output = laptop.name, disabled = false, position = "0x0", scale = "auto" })
             end
         end,
     },
@@ -236,12 +298,32 @@ function hyprDetectMonitorProfile()
     if not external then return "Laptop only" end
     if not laptop.enabled then return "External only" end
     if not external.enabled then return "Laptop only" end
-    if external.is_mirror then return "Duplicate" end
+    if external.is_mirror or softwareMirrorRunning() then return "Duplicate" end
     return "Extend"
 end
 
 -- opts.silent  : don't show a notification (used for automatic re-apply)
 -- opts.persist : false = don't overwrite the saved choice (used for fallbacks)
+
+-- Guards against monitor.added/config.reloaded handlers re-applying the saved
+-- profile while an explicit profile change is still running.
+local applyingProfile = false
+local settleTimer
+local focusTimer
+
+-- Put focus back on the laptop panel when it is on, otherwise on the external.
+local function focusPrimary()
+    local laptop = internalMonitor()
+    if laptop and laptop.enabled then
+        hl.dispatch(hl.dsp.focus({ monitor = laptop.name }))
+        return
+    end
+    local external = externalMonitor()
+    if external and external.enabled then
+        hl.dispatch(hl.dsp.focus({ monitor = external.name }))
+    end
+end
+
 function hyprSetMonitorProfile(name, opts)
     opts = opts or {}
 
@@ -254,11 +336,32 @@ function hyprSetMonitorProfile(name, opts)
                 return false
             end
 
-            profile.apply()
-
+            -- Persist before applying: enabling outputs fires monitor.added,
+            -- and that handler must see the new choice, not the previous one.
             if opts.persist ~= false then
                 saveProfile(profile.name)
             end
+
+            -- A profile change always tears down a previous software mirror;
+            -- Duplicate restarts it when the outputs are on different cards.
+            applyingProfile = true
+            stopSoftwareMirror()
+            profile.apply()
+
+            -- Enabling or rescaling an output emits monitor.added. Ignore
+            -- those events briefly, otherwise they re-apply a stale profile
+            -- and the layout churns.
+            if settleTimer then settleTimer:set_enabled(false) end
+            settleTimer = hl.timer(function()
+                applyingProfile = false
+            end, { timeout = 1200, type = "oneshot" })
+
+            -- Enabling a monitor can move focus to it; put it back once the
+            -- layout has settled.
+            focusPrimary()
+            if focusTimer then focusTimer:set_enabled(false) end
+            focusTimer = hl.timer(focusPrimary, { timeout = 800, type = "oneshot" })
+
             if not opts.silent then
                 hl.notification.create({ text = "Monitor: " .. name, timeout = 1500, icon = "ok" })
             end
@@ -275,6 +378,8 @@ end
 -- Restore the saved profile. If it cannot run right now (for example the
 -- external was unplugged), fall back safely without overwriting the choice.
 local function applySavedProfile()
+    if applyingProfile then return end
+
     if not internalMonitor() and not externalMonitor() then
         return -- monitors are not initialized yet
     end
@@ -583,6 +688,14 @@ hl.window_rule({
     match = { title = "^(Picture-in-Picture|Picture in picture)$" },
     float = true,
     pin   = true,
+})
+
+-- wl-mirror's fullscreen surface is only a view of the laptop output; it must
+-- never take keyboard focus or new windows would open on the mirrored screen.
+hl.window_rule({
+    name     = "software-mirror",
+    match    = { class = "at\\.yrlf\\.wl_mirror" },
+    no_focus = true,
 })
 
 -- Fix pinentry (GPG/SSH agent) losing focus

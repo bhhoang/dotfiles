@@ -36,11 +36,18 @@ Machine-specific values:
 `SUPER + SHIFT + M` cycles `Extend`, `External only`, `Duplicate`, and
 `Laptop only`. Profiles whose outputs are not connected are skipped.
 
-Hyprland cannot mirror across GPUs, so `Duplicate` is only offered when the
-internal panel and the external output are on the same DRM card. Laptops that
-wire the panel to the iGPU and HDMI to the dGPU need a firmware MUX /
-Discrete Graphics / PEG setting to make a real duplicate possible; otherwise
-use `Extend` or `External only`, or a software mirror such as `wl-mirror`.
+`Duplicate` uses Hyprland's native mirror when both outputs are on the same
+DRM card. When the panel and the external output are on different GPUs it
+falls back to `wl-mirror`, which copies the composed image the same way
+Windows' display duplication does. The mirrored output is view-only: keyboard
+and pointer input stay on the laptop.
+
+While duplicating, both outputs run at scale 1. The panel normally uses 1.5x,
+so copying a 1280x720 logical image to a 1x 1920x1080 output would blur the
+text. The UI is therefore smaller on the laptop while this profile is active.
+
+A firmware MUX / Discrete Graphics / PEG setting that moves the panel onto the
+dGPU also makes the native mirror work, with no `wl-mirror` involved.
 
 The Hyprland monitor setup is auto-detected, and the NVIDIA environment lines
 in `hyprland.lua` are commented out, so it is not tied to this GPU.
