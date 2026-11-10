@@ -38,12 +38,13 @@ Machine-specific values:
 
 `Duplicate` uses Hyprland's native compositor mirror: the external output is
 routed to the laptop panel's workspace (`mirrorOf`), so both screens show the
-same workspace and cursor. Both outputs run at scale 1 while duplicating; the
-panel normally uses 1.5x, and copying a 1280x720 logical image to a 1920x1080
-output would upscale it and blur the text. The UI is therefore smaller on the
-laptop while this profile is active.
+same workspace and cursor. Both outputs use the lower of their two scales,
+which keeps the lower-DPI screen at 1:1 and avoids upscaling blur. The mirror
+works across GPUs; no firmware MUX is involved.
 
-The mirror works across GPUs; no firmware MUX is involved.
+The profiles assume one internal panel plus one external output. On a desktop
+with only external monitors, `Extend` leaves the auto layout alone and the
+panel-specific profiles are hidden.
 
 The Hyprland monitor setup is auto-detected, and the NVIDIA environment lines
 in `hyprland.lua` are commented out, so it is not tied to this GPU.

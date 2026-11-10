@@ -99,15 +99,18 @@ local function applyDuplicate()
     local laptop, external = internalMonitor(), externalMonitor()
     if not laptop or not external then return end
 
-    -- Both outputs run at scale 1 so the clone is a 1:1 pixel copy; the panel
-    -- normally uses 1.5x and the copy would otherwise be upscaled and blurry.
-    hl.monitor({ output = laptop.name, disabled = false, position = "0x0", scale = 1 })
+    -- Mirror at the lower of the two scales. The lower-DPI output then shows
+    -- the desktop 1:1 instead of upscaling a smaller logical image, which is
+    -- what makes the clone look sharp.
+    local scale = math.min(laptop.scale or 1, external.scale or 1)
+
+    hl.monitor({ output = laptop.name, disabled = false, position = "0x0", scale = scale })
     hl.monitor({
         output = external.name,
         mirror = laptop.name,
         disabled = false,
         position = "0x0",
-        scale = 1,
+        scale = scale,
     })
 end
 
