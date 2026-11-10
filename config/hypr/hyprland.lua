@@ -114,6 +114,31 @@ local function applyDuplicate()
     })
 end
 
+-- Scale for an internal panel. Hyprland's "auto" picks 1.5 for a ~144 PPI
+-- 1080p panel, which makes toolkits and Waybar feel oversized. Cap 1080p
+-- panels at 1.25; keep the PPI-based scale for denser screens.
+local function panelScale(monitor)
+    local w, h = monitor.width or 0, monitor.height or 0
+    local pw, ph = monitor.physical_width or 0, monitor.physical_height or 0
+    local scale = 1
+
+    if w > 0 and h > 0 and pw > 0 and ph > 0 then
+        local diagonalPx = math.sqrt(w * w + h * h)
+        local diagonalIn = math.sqrt(pw * pw + ph * ph) / 25.4
+        local ppi = diagonalPx / diagonalIn
+        if ppi > 200 then
+            scale = 2
+        elseif ppi > 140 then
+            scale = 1.5
+        end
+    end
+
+    if w <= 1920 then
+        return math.min(scale, 1.25)
+    end
+    return scale
+end
+
 -- Runtime monitor profiles, cycled with SUPER + SHIFT + M:
 --   Extend -> External only -> Duplicate -> Laptop only
 -- Profiles needing an output that is not connected are skipped.
@@ -129,7 +154,7 @@ local monitorProfiles = {
         apply = function()
             local laptop, external = internalMonitor(), externalMonitor()
             if laptop then
-                hl.monitor({ output = laptop.name, disabled = false, position = "0x0", scale = "auto" })
+                hl.monitor({ output = laptop.name, disabled = false, position = "0x0", scale = panelScale(laptop) })
             end
             if external then
                 hl.monitor({ output = external.name, mirror = "", disabled = false, position = "auto", scale = "auto" })
@@ -179,7 +204,7 @@ local monitorProfiles = {
                 hl.monitor({ output = external.name, mirror = "", disabled = true })
             end
             if laptop then
-                hl.monitor({ output = laptop.name, disabled = false, position = "0x0", scale = "auto" })
+                hl.monitor({ output = laptop.name, disabled = false, position = "0x0", scale = panelScale(laptop) })
             end
         end,
     },
