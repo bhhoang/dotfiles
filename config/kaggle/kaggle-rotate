@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import fcntl
+from datetime import datetime
 import getpass
 import json
 import os
@@ -317,14 +318,39 @@ def exec_with_account(name: str, command: list[str]) -> int:
     os.execvpe(command[0], command, env)
 
 
-def attempt(name: str, command: list[str]) -> tuple[int, str]:
+def capture(name: str, command: list[str]) -> tuple[int, str]:
     env = credentials_env(name)
-    update_last(name)
     with tempfile.TemporaryFile() as output:
         process = subprocess.run(command, env=env, stdout=output, stderr=subprocess.STDOUT)
         output.seek(0)
         text = output.read().decode(errors="replace")
     return process.returncode, text
+
+
+def attempt(name: str, command: list[str]) -> tuple[int, str]:
+    update_last(name)
+    return capture(name, command)
+
+
+def quota_refresh(name: str) -> float | None:
+    """Return the latest quota refresh time for an account, if available."""
+    code, text = capture(name, ["kaggle", "quota", "--format", "json"])
+    if code != 0:
+        return None
+    try:
+        rows = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    times: list[float] = []
+    for row in rows if isinstance(rows, list) else []:
+        value = row.get("refreshAt") if isinstance(row, dict) else None
+        if not isinstance(value, str):
+            continue
+        try:
+            times.append(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp())
+        except ValueError:
+            continue
+    return max(times) if times else None
 
 
 def cmd_use(args: argparse.Namespace, command: list[str]) -> int:
@@ -366,11 +392,14 @@ def cmd_run(args: argparse.Namespace, command: list[str]) -> int:
         if QUOTA_RE.search(text):
             if text:
                 sys.stderr.write(text)
-            print(
-                f"kaggle-rotate: '{name}' hit a quota/rate limit; marking it exhausted for {days:g} days",
-                file=sys.stderr,
-            )
-            set_exhausted(name, time.time() + days * 86400)
+            until = quota_refresh(name)
+            if until is None or until <= time.time():
+                until = time.time() + days * 86400
+                detail = f"marking it exhausted for {days:g} days"
+            else:
+                detail = "marking it exhausted until " + time.strftime("%Y-%m-%d %H:%M", time.localtime(until))
+            print(f"kaggle-rotate: '{name}' hit a quota/rate limit; {detail}", file=sys.stderr)
+            set_exhausted(name, until)
             state = load_state()
             continue
 
@@ -411,8 +440,14 @@ def cmd_quota(args: argparse.Namespace) -> int:
 def cmd_exhaust(args: argparse.Namespace) -> int:
     if args.name not in account_names():
         die(f"unknown account '{args.name}'")
-    set_exhausted(args.name, time.time() + args.days * 86400)
-    print(f"'{args.name}' marked exhausted for {args.days:g} days")
+    if args.until_reset:
+        until = quota_refresh(args.name)
+        if until is None:
+            die("could not read the quota refresh time; use --days instead")
+    else:
+        until = time.time() + args.days * 86400
+    set_exhausted(args.name, until)
+    print(f"'{args.name}' marked exhausted until {time.strftime('%Y-%m-%d %H:%M', time.localtime(until))}")
     return 0
 
 
@@ -475,6 +510,8 @@ def build_parser() -> argparse.ArgumentParser:
     exhaust = sub.add_parser("exhaust", help="mark an account exhausted manually")
     exhaust.add_argument("name")
     exhaust.add_argument("--days", type=float, default=DEFAULT_DAYS)
+    exhaust.add_argument("--until-reset", action="store_true",
+                         help="use Kaggle's quota refreshAt time instead of --days")
     exhaust.set_defaults(func=cmd_exhaust)
 
     reset = sub.add_parser("reset", help="clear an account's exhausted state")

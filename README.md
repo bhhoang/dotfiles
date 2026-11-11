@@ -29,8 +29,9 @@ with `KAGGLE_CONFIG_DIR` pointed at that account, so the global
 `~/.kaggle/kaggle.json` is never rewritten.
 
 `kaggle-rotate run -- <command>` rotates accounts when a command fails with a
-quota or rate-limit error, marks that account exhausted for 7 days, and retries
-the next one. `kaggle-rotate quota` shows the API quota report per account.
+quota or rate-limit error, marks that account exhausted until Kaggle's reported
+quota refresh time (or 7 days if it cannot read it), and retries the next one.
+`kaggle-rotate quota` shows the API quota report per account.
 
 Credentials and the exhausted state (`~/.local/state/kaggle-rotate/`) are never
 committed.
