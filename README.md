@@ -6,6 +6,13 @@ Dotfiles for my arch config
 - `config/refind/theme/` → `/boot/EFI/refind/theme/`
 - `refind_linux.conf` → `/boot/refind_linux.conf`
 
+## WezTerm
+- `config/wezterm/wezterm.lua` → `~/.config/wezterm/wezterm.lua`
+
+Noto Sans Mono with the Catppuccin Mocha palette, a translucent background
+(blurred by Hyprland), a borderless window, and tabs styled to match Waybar
+and rofi. XWayland is kept enabled for reliable fcitx5 input.
+
 ## SDDM / Xorg
 - `config/sddm/start-xorg.sh` → `/etc/sddm/start-xorg.sh` (chmod +x)
 - `config/sddm/10-xsetup.conf` → `/etc/sddm.conf.d/10-xsetup.conf`
