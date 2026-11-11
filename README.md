@@ -13,6 +13,13 @@ Noto Sans Mono with the Catppuccin Mocha palette, a translucent background
 (blurred by Hyprland), a borderless window, and tabs styled to match Waybar
 and rofi. XWayland is kept enabled for reliable fcitx5 input.
 
+## OpenCode
+- `config/opencode/cli.json` → `~/.config/opencode/cli.json`
+
+The TUI uses the `system` theme, so it inherits WezTerm’s Catppuccin palette
+and the glass background. `mode: dark` keeps it from switching to a light
+palette.
+
 ## SDDM / Xorg
 - `config/sddm/start-xorg.sh` → `/etc/sddm/start-xorg.sh` (chmod +x)
 - `config/sddm/10-xsetup.conf` → `/etc/sddm.conf.d/10-xsetup.conf`
