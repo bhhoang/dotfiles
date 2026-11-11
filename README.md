@@ -20,6 +20,21 @@ The TUI uses the `system` theme, so it inherits WezTerm’s Catppuccin palette
 and the glass background. `mode: dark` keeps it from switching to a light
 palette.
 
+## Kaggle accounts
+- `config/kaggle/kaggle-rotate` → `~/.local/bin/kaggle-rotate` (chmod +x)
+
+Each account lives in `~/.config/kaggle/accounts/<name>/`, with either an
+`access_token` file (new CLI API token) or a legacy `kaggle.json`. Commands run
+with `KAGGLE_CONFIG_DIR` pointed at that account, so the global
+`~/.kaggle/kaggle.json` is never rewritten.
+
+`kaggle-rotate run -- <command>` rotates accounts when a command fails with a
+quota or rate-limit error, marks that account exhausted for 7 days, and retries
+the next one. `kaggle-rotate quota` shows the API quota report per account.
+
+Credentials and the exhausted state (`~/.local/state/kaggle-rotate/`) are never
+committed.
+
 ## SDDM / Xorg
 - `config/sddm/start-xorg.sh` → `/etc/sddm/start-xorg.sh` (chmod +x)
 - `config/sddm/10-xsetup.conf` → `/etc/sddm.conf.d/10-xsetup.conf`

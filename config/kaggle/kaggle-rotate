@@ -1,0 +1,515 @@
+#!/usr/bin/env python3
+"""Manage and rotate multiple Kaggle accounts.
+
+Each account gets its own Kaggle config directory:
+
+    ~/.config/kaggle/accounts/<name>/
+
+Authentication is one of:
+
+    access_token   Kaggle API token (KAGGLE_API_TOKEN), recommended
+    kaggle.json    legacy username + API key
+
+Commands run with KAGGLE_CONFIG_DIR pointing at the selected account, so the
+global ~/.kaggle/kaggle.json is never rewritten and accounts never collide.
+
+Examples:
+    kaggle-rotate add work                 # prompts for an API token
+    kaggle-rotate add old --legacy         # username + legacy key
+    kaggle-rotate list
+    kaggle-rotate use work -- kaggle datasets list
+    kaggle-rotate run -- kaggle datasets list
+    kaggle-rotate run -- python train.py
+    kaggle-rotate quota
+    kaggle-rotate exhaust work --days 7
+    kaggle-rotate reset work
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import fcntl
+import getpass
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+CONFIG_ROOT = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "kaggle" / "accounts"
+STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "kaggle-rotate"
+STATE_FILE = STATE_DIR / "state.json"
+LOCK_FILE = STATE_DIR / "lock"
+
+TOKEN_FILE = "access_token"
+LEGACY_FILE = "kaggle.json"
+DEFAULT_DAYS = float(os.environ.get("KAGGLE_ROTATE_DAYS", "7"))
+QUOTA_RE = re.compile(
+    r"(?i)(quota|exceeded|exhausted|rate.?limit|too many requests|\b429\b|forbidden.*(limit|quota))"
+)
+
+
+def die(message: str, code: int = 2) -> "NoReturn":
+    print(f"kaggle-rotate: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def valid_name(name: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z0-9._-]+", name))
+
+
+def ensure_dirs() -> None:
+    CONFIG_ROOT.mkdir(parents=True, exist_ok=True)
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(CONFIG_ROOT, 0o700)
+    os.chmod(STATE_DIR, 0o700)
+
+
+def account_dir(name: str) -> Path:
+    return CONFIG_ROOT / name
+
+
+def account_names() -> list[str]:
+    if not CONFIG_ROOT.is_dir():
+        return []
+    names = []
+    for entry in CONFIG_ROOT.iterdir():
+        if not entry.is_dir():
+            continue
+        if (entry / TOKEN_FILE).is_file() or (entry / LEGACY_FILE).is_file():
+            names.append(entry.name)
+    return sorted(names)
+
+
+def account_auth(name: str) -> str:
+    directory = account_dir(name)
+    if (directory / TOKEN_FILE).is_file():
+        return "token"
+    return "legacy"
+
+
+def read_token(name: str) -> str:
+    path = account_dir(name) / TOKEN_FILE
+    try:
+        token = path.read_text().strip()
+    except OSError as exc:
+        die(f"cannot read {path}: {exc}")
+    if not token:
+        die(f"{path} is empty")
+    return token
+
+
+def read_legacy(name: str) -> tuple[str, str]:
+    path = account_dir(name) / LEGACY_FILE
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        die(f"cannot read {path}: {exc}")
+    username = data.get("username")
+    key = data.get("key")
+    if not isinstance(username, str) or not isinstance(key, str) or not username or not key:
+        die(f"{path} must contain non-empty 'username' and 'key' fields")
+    return username, key
+
+
+def credentials_env(name: str) -> dict[str, str]:
+    env = os.environ.copy()
+    for variable in ("KAGGLE_USERNAME", "KAGGLE_KEY", "KAGGLE_API_TOKEN"):
+        env.pop(variable, None)
+    env["KAGGLE_CONFIG_DIR"] = str(account_dir(name))
+
+    auth = account_auth(name)
+    if auth == "token":
+        env["KAGGLE_API_TOKEN"] = read_token(name)
+    elif auth == "legacy":
+        username, key = read_legacy(name)
+        env["KAGGLE_USERNAME"] = username
+        env["KAGGLE_KEY"] = key
+    return env
+
+
+def load_state() -> dict:
+    if not STATE_FILE.is_file():
+        return {"last": None, "accounts": {}}
+    try:
+        state = json.loads(STATE_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {"last": None, "accounts": {}}
+    state.setdefault("last", None)
+    state.setdefault("accounts", {})
+    return state
+
+
+def save_state(state: dict) -> None:
+    payload = json.dumps(state, indent=2, sort_keys=True) + "\n"
+    fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=STATE_DIR)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(payload)
+        os.chmod(tmp_name, 0o600)
+        os.replace(tmp_name, STATE_FILE)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp_name)
+
+
+@contextlib.contextmanager
+def state_lock():
+    ensure_dirs()
+    with open(LOCK_FILE, "a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def update_last(name: str) -> None:
+    with state_lock():
+        state = load_state()
+        state["last"] = name
+        save_state(state)
+
+
+def set_exhausted(name: str, until: float) -> None:
+    with state_lock():
+        state = load_state()
+        state.setdefault("accounts", {}).setdefault(name, {})["exhausted_until"] = until
+        save_state(state)
+
+
+def clear_exhausted(name: str) -> None:
+    with state_lock():
+        state = load_state()
+        state.get("accounts", {}).pop(name, None)
+        save_state(state)
+
+
+def exhausted_until(name: str, state: dict) -> float:
+    return float(state.get("accounts", {}).get(name, {}).get("exhausted_until", 0) or 0)
+
+
+def remaining(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes = seconds // 60
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def write_private(path: Path, content: str) -> None:
+    fd, tmp_name = tempfile.mkstemp(prefix=".tmp-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(content)
+        os.chmod(tmp_name, 0o600)
+        os.replace(tmp_name, path)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp_name)
+
+
+def create_account_dir(name: str) -> Path:
+    directory = account_dir(name)
+    directory.mkdir(parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
+    return directory
+
+
+def cmd_add(args: argparse.Namespace) -> int:
+    name = args.name
+    if not valid_name(name):
+        die("account name may only contain letters, digits, '.', '_' and '-'")
+    if account_names().count(name) and not args.force:
+        die(f"account '{name}' already exists (use --force to replace it)")
+
+    if args.username or args.key or args.legacy:
+        username = (args.username or input("Kaggle username: ")).strip()
+        key = (args.key or getpass.getpass("Kaggle API key: ")).strip()
+        if not username or not key:
+            die("username and legacy API key are required")
+        directory = create_account_dir(name)
+        for old in (TOKEN_FILE,):
+            with contextlib.suppress(FileNotFoundError):
+                (directory / old).unlink()
+        write_private(directory / LEGACY_FILE,
+                      json.dumps({"username": username, "key": key}) + "\n")
+        print(f"added legacy account '{name}' ({username})")
+        return 0
+
+    token = (args.token or "").strip()
+    if not token:
+        token = getpass.getpass("Kaggle API token (leave empty for a legacy key): ").strip()
+    if not token:
+        return cmd_add(argparse.Namespace(
+            name=name, token=None, username=None, key=None,
+            legacy=True, force=True,
+        ))
+
+    directory = create_account_dir(name)
+    for old in (LEGACY_FILE,):
+        with contextlib.suppress(FileNotFoundError):
+            (directory / old).unlink()
+    write_private(directory / TOKEN_FILE, token + "\n")
+    print(f"added token account '{name}'")
+    return 0
+
+
+def cmd_list(_args: argparse.Namespace) -> int:
+    names = account_names()
+    global_token = Path.home() / ".kaggle" / "access_token"
+    if global_token.is_file():
+        print(
+            f"warning: {global_token} exists and takes precedence over legacy "
+            "accounts; remove it or use token accounts",
+            file=sys.stderr,
+        )
+    if not names:
+        print(f"no accounts in {CONFIG_ROOT}")
+        return 0
+
+    state = load_state()
+    now = time.time()
+
+    if not sys.stdout.isatty():
+        for name in names:
+            auth = account_auth(name)
+            detail = "token"
+            if auth == "legacy":
+                username, _ = read_legacy(name)
+                detail = f"legacy:{username}"
+            until = exhausted_until(name, state)
+            status = f"exhausted-until={int(until)}" if until > now else "ready"
+            marker = " (last)" if state.get("last") == name else ""
+            print(f"{name}\t{detail}\t{status}{marker}")
+        return 0
+
+    print(f"{'ACCOUNT':<20} {'AUTH':<28} {'STATUS'}")
+    for name in names:
+        auth = account_auth(name)
+        if auth == "legacy":
+            username, _ = read_legacy(name)
+            detail = f"legacy ({username})"
+        else:
+            detail = "API token"
+        until = exhausted_until(name, state)
+        status = f"exhausted, resets in {remaining(until - now)}" if until > now else "ready"
+        if state.get("last") == name:
+            status += "  (last used)"
+        print(f"{name:<20} {detail:<28} {status}")
+    return 0
+
+
+def exec_with_account(name: str, command: list[str]) -> int:
+    env = credentials_env(name)
+    update_last(name)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os.execvpe(command[0], command, env)
+
+
+def attempt(name: str, command: list[str]) -> tuple[int, str]:
+    env = credentials_env(name)
+    update_last(name)
+    with tempfile.TemporaryFile() as output:
+        process = subprocess.run(command, env=env, stdout=output, stderr=subprocess.STDOUT)
+        output.seek(0)
+        text = output.read().decode(errors="replace")
+    return process.returncode, text
+
+
+def cmd_use(args: argparse.Namespace, command: list[str]) -> int:
+    if args.name not in account_names():
+        die(f"unknown account '{args.name}'")
+    return exec_with_account(args.name, command)
+
+
+def cmd_run(args: argparse.Namespace, command: list[str]) -> int:
+    names = account_names()
+    if not names:
+        die(f"no accounts in {CONFIG_ROOT}; add one with `kaggle-rotate add <name>`")
+
+    state = load_state()
+    last = state.get("last")
+    start = (names.index(last) + 1) % len(names) if last in names else 0
+    order = names[start:] + names[:start]
+
+    days = args.days
+    now = time.time()
+    attempted = 0
+
+    for name in order:
+        until = exhausted_until(name, state)
+        if until > now:
+            print(
+                f"kaggle-rotate: skipping '{name}' (exhausted, resets in {remaining(until - now)})",
+                file=sys.stderr,
+            )
+            continue
+
+        attempted += 1
+        code, text = attempt(name, command)
+        if code == 0:
+            if text:
+                sys.stdout.write(text)
+            return 0
+
+        if QUOTA_RE.search(text):
+            if text:
+                sys.stderr.write(text)
+            print(
+                f"kaggle-rotate: '{name}' hit a quota/rate limit; marking it exhausted for {days:g} days",
+                file=sys.stderr,
+            )
+            set_exhausted(name, time.time() + days * 86400)
+            state = load_state()
+            continue
+
+        if text:
+            sys.stderr.write(text)
+        return code if code >= 0 else 128 - code
+
+    if attempted == 0:
+        die("all accounts are marked exhausted; reset one with `kaggle-rotate reset <name>`")
+    die("every available account hit a quota/rate limit")
+    return 1
+
+
+def cmd_quota(args: argparse.Namespace) -> int:
+    if args.name:
+        if args.name not in account_names():
+            die(f"unknown account '{args.name}'")
+        names = [args.name]
+    else:
+        names = account_names()
+    if not names:
+        die(f"no accounts in {CONFIG_ROOT}")
+
+    command = ["kaggle", "quota"]
+    if args.json:
+        command += ["--format", "json"]
+
+    for name in names:
+        if len(names) > 1:
+            print(f"== {name} ==")
+        env = credentials_env(name)
+        process = subprocess.run(command, env=env)
+        if process.returncode != 0 and len(names) > 1:
+            print(f"kaggle-rotate: quota failed for '{name}'", file=sys.stderr)
+    return 0
+
+
+def cmd_exhaust(args: argparse.Namespace) -> int:
+    if args.name not in account_names():
+        die(f"unknown account '{args.name}'")
+    set_exhausted(args.name, time.time() + args.days * 86400)
+    print(f"'{args.name}' marked exhausted for {args.days:g} days")
+    return 0
+
+
+def cmd_reset(args: argparse.Namespace) -> int:
+    if args.name not in account_names():
+        die(f"unknown account '{args.name}'")
+    clear_exhausted(args.name)
+    print(f"'{args.name}' is ready")
+    return 0
+
+
+def cmd_remove(args: argparse.Namespace) -> int:
+    if args.name not in account_names():
+        die(f"unknown account '{args.name}'")
+    if not args.yes:
+        answer = input(f"Delete account '{args.name}'? [y/N] ").strip().lower()
+        if answer not in {"y", "yes"}:
+            print("cancelled")
+            return 1
+    shutil.rmtree(account_dir(args.name))
+    clear_exhausted(args.name)
+    print(f"removed '{args.name}'")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="kaggle-rotate",
+        description="Manage and rotate multiple Kaggle accounts.",
+        epilog="Put the command after `--`: `kaggle-rotate run -- kaggle datasets list`.",
+    )
+    sub = parser.add_subparsers(dest="sub", required=True)
+
+    add = sub.add_parser("add", help="add an API-token or legacy account")
+    add.add_argument("name")
+    add.add_argument("--token", help="Kaggle API token")
+    add.add_argument("--legacy", action="store_true", help="use username + legacy key")
+    add.add_argument("--username")
+    add.add_argument("--key", help="legacy API key")
+    add.add_argument("--force", action="store_true", help="replace an existing account")
+    add.set_defaults(func=cmd_add)
+
+    listing = sub.add_parser("list", help="list accounts and exhaustion state")
+    listing.set_defaults(func=cmd_list)
+
+    use = sub.add_parser("use", help="run one command with a specific account")
+    use.add_argument("name")
+    use.set_defaults(func=None)
+
+    run = sub.add_parser("run", help="run a command, rotating on quota errors")
+    run.add_argument("--days", type=float, default=DEFAULT_DAYS,
+                     help=f"days to mark an account exhausted (default {DEFAULT_DAYS:g})")
+    run.set_defaults(func=None)
+
+    quota = sub.add_parser("quota", help="show Kaggle quota for one or all accounts")
+    quota.add_argument("name", nargs="?")
+    quota.add_argument("--json", action="store_true", help="use kaggle quota --format json")
+    quota.set_defaults(func=cmd_quota)
+
+    exhaust = sub.add_parser("exhaust", help="mark an account exhausted manually")
+    exhaust.add_argument("name")
+    exhaust.add_argument("--days", type=float, default=DEFAULT_DAYS)
+    exhaust.set_defaults(func=cmd_exhaust)
+
+    reset = sub.add_parser("reset", help="clear an account's exhausted state")
+    reset.add_argument("name")
+    reset.set_defaults(func=cmd_reset)
+
+    remove = sub.add_parser("remove", help="delete a stored account")
+    remove.add_argument("name")
+    remove.add_argument("--yes", action="store_true")
+    remove.set_defaults(func=cmd_remove)
+
+    return parser
+
+
+def main() -> int:
+    ensure_dirs()
+    argv = sys.argv[1:]
+    command: list[str] = []
+    if "--" in argv:
+        index = argv.index("--")
+        command = argv[index + 1:]
+        argv = argv[:index]
+
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.sub in {"use", "run"}:
+        if not command:
+            parser.error(f"`{args.sub}` needs a command after --")
+        if args.sub == "use":
+            return cmd_use(args, command)
+        return cmd_run(args, command)
+
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
